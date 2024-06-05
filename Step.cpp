@@ -5,6 +5,8 @@
 #include <string>
 #include <list>
 #include <vector>  
+#include <algorithm>
+#include <direct.h>
 
 using namespace std;
 struct _pair
@@ -20,6 +22,12 @@ struct _pair
 };
 
 //
+bool pair_compare_x(const _pair& p1, const _pair& p2)
+{
+	return p1.t < p2.t;
+}
+
+//
 bool read_csv(char *fname, vector<_pair> &g)
 {
 	FILE* fp = fopen(fname, "r");
@@ -31,12 +39,15 @@ bool read_csv(char *fname, vector<_pair> &g)
 	fgets(buff, 256, fp); // ヘッダ2
 
 	float t, v;
-	while (2 == fscanf(fp, "%f %f\n", &t, &v)) {
-		if (t < 0) break;
+	while (fgets(buff, 256, fp)) {
+		if (buff[0] == '\n') 
+			continue;
+		2 == sscanf(buff, "%f %f\n", &t, &v);
 		g.push_back(_pair(t, v));
 	}
 	fclose(fp);
 
+	sort(g.begin(), g.end(), pair_compare_x);
 	return true;
 }
 
@@ -140,12 +151,24 @@ float search_ts(vector<_pair>& G, float TN)
 // Main
 int main(int argc, char **argv)
 {
-	if (argc != 2) {
-		printf("Usage: step inputfile\n");
+	if (argc != 3) {
+		printf("Usage: step input-file output-dir\n");
 	}
+
+	if (_mkdir(argv[2])) {
+		printf("%sは既存です\n", argv[2]);
+	}
+
+	// 入力ファイル読み込み
+	char buff[256];
+	sprintf(buff, "%s\\%s", argv[2], argv[1]);
 	vector<_pair> g;
-	if (!read_csv(argv[1], g))
+	if (!read_csv(buff, g))
 		return -1;
+
+	// 時間ソートしたデータを保存
+	sprintf(buff, "%s\\S-%s", argv[2], argv[1]);
+	write_csv(buff, g);
 
 	// TN実験応答時間 T(2*tmax)
 	float tmin = 0.42e-6*2;
@@ -165,7 +188,8 @@ int main(int argc, char **argv)
 	// ts 整定時間
 	vector<_pair> G;
 	integralT(O1, g, G);
-	write_csv((char*)"T(t).txt", G);
+	sprintf(buff, "%s\\S-T(t).txt", argv[2]);
+	write_csv(buff, G);
 
 	ts = search_ts(G, TN);
 	printf("ts=%10.3e\n", ts);
