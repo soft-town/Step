@@ -21,6 +21,27 @@ struct _pair
 	}
 };
 
+// fc カットオフ
+// 　RC = 1 / (2*π*fc)
+// 　a = Δt/(RC + Δt)
+// 　y[i] = a*x[i] +(1-a)*y[i-1]
+//
+void lowpass(std::vector<_pair>& wavei, std::vector<_pair>& waveo, float fc)
+{
+	double RC = 1 / (2 * M_PI * fc);
+	double dt = wavei[1].t - wavei[0].t;
+	double a = dt / (RC + dt);
+
+	waveo.resize(wavei.size());
+	waveo[0] = wavei[0];
+	for (int i = 0; i + 1 < wavei.size(); i++) {
+		waveo[i + 1].v = a * wavei[i + 1].v + (1 - a) * wavei[i].v;
+		waveo[i + 1].t = wavei[i + 1].t;
+	}
+	printf("Lowpass fc=%10.3e, a=%10.3e\n", fc, a);
+}
+
+
 //
 bool pair_compare_x(const _pair& p1, const _pair& p2)
 {
@@ -36,7 +57,6 @@ bool read_csv(char *fname, vector<_pair> &g)
 
 	char buff[256];
 	fgets(buff, 256, fp); // ヘッダ
-	fgets(buff, 256, fp); // ヘッダ2
 
 	float t, v;
 	while (fgets(buff, 256, fp)) {
@@ -60,90 +80,73 @@ bool write_csv(char* fname, vector<_pair>& g)
 
 	char buff[256];
 	fprintf(fp, "Time[s]	Normalized voltage[p.u.]\n");
-	fprintf(fp, "dummy\n");
 
 	for (int i=0; i<g.size(); i++) {
-		fprintf(fp, "%10.4e %10.4e\n", g[i].t, g[i].v);
+		fprintf(fp, "%10.7e %10.7e\n", g[i].t, g[i].v);
 	}
 	fclose(fp);
 
 	return true;
 }
 
-// 関数(g)が単調増加を開始する時刻orgを求めるはずだが、
-// g[i].tが0になる点を求めるようにした
+// 関数(g)が単調増加を開始する時刻O1を求める
 //
 float detOrg(vector<_pair>& g)
 {
-	float v = g[0].v;
-	int i = 0;
-	while (g[i].v<=v) {
-		v = g[i++].v;
-	}
-	while (g[i].t <= 0) {
+	// データ開始後5000サンプルの振幅
+	float s = 0;
+	int i, n = 50000;
+	for (i = 0; i < n; i++)
+		s += fabs(g[i].v);
+	s /= n;
+
+	i = 0;
+	while (g[i].v <= s*100) {
 		i++;
 	}
-	printf("O1=%d, %10.3e, %10.3e\n", i, g[i].t, v);
+	printf("O1=%d, %10.7e, %10.7e\n", i, g[i].t, s);
 	return g[i].t;	
 }
 
-// 関数(1-g)をfromからtoまで積分
 
-float integralT(float from, float to, vector<_pair>& g)
-{
-	printf("integralT [%10.3e,%10.3e]\n", from, to);
-	int i;
-	for (i = 0; g[i].t < from; i++);
-	float s = 0;
-	for (i++; g[i].t < to; i++) {
-		s += (1 - g[i].v) * (g[i].t - g[i-1].t);
-	}
-	return s;
-}
-
-// 関数(1-g)をfromから全区間積分
+// T(t)を求める、関数(1-g)をステップ応答原点O1から全区間積分
  
-void integralT(float from, vector<_pair>& g, vector<_pair>& G)
+void integralT(float O1, vector<_pair>& g, vector<_pair>& T)
 {
 	int i;
-	for (i = 0; g[i].t < from; i++) {
-		G.push_back(_pair(g[i].t, 0));
-	}
 	float s = 0;
-	for (; i<g.size(); i++) {
-		if (g[i].t < 0) 
-			break;
+	for (int i=0; i<g.size(); i++) {
+		if (g[i].t < O1) {
+			T.push_back(_pair(g[i].t, 0));
+			continue;
+		}
 		s += (1 - g[i].v) * (g[i].t - g[i - 1].t);
-		G.push_back(_pair(g[i].t, s));
+		T.push_back(_pair(g[i].t, s));
 	}
 }
 
+// T (t)の最大値
 
-// g(t)=1となる最小のtに対するintegralT(0,t)
-
-float calc_Ta(vector<_pair>& g)
+float calc_Ta(vector<_pair>&T)
 {
-	float eps = 1e-3;
 	int i;
-	for (i = 1; i < g.size(); i++) {
-		if (fabs(g[i].v - 1) < eps) break;
+	float mv = FLT_MIN;
+	for (i = 0; i < T.size(); i++) {
+		if (mv < T[i].v) mv = T[i].v;
 	}
-	if (i < g.size()) {
-		return integralT(g[0].t, g[i].t, g);
-	}
-	return 0;
+	return mv;
 }
 
 // fabs(TN-G(t))<0.02tが成り立つ最小のt
 
-float search_ts(vector<_pair>& G, float TN)
+float search_ts(vector<_pair>& T, float TN)
 {
 	int i;
-	for (i = G.size()-1; 0 <= i; i--) {
-		if(0.02 * G[i].t < fabs(G[i].v - TN)) break;
+	for (i = T.size()-1; 0 <= i; i--) {
+		if(0.02 * T[i].t < fabs(T[i].v - TN)) break;
 	}
 	if (0<=i) {
-		return G[i].t;
+		return T[i].t;
 	}
 	return 0;
 }
@@ -152,11 +155,7 @@ float search_ts(vector<_pair>& G, float TN)
 int main(int argc, char **argv)
 {
 	if (argc != 3) {
-		printf("Usage: step input-file output-dir\n");
-	}
-
-	if (_mkdir(argv[2])) {
-		printf("%sは既存です\n", argv[2]);
+		printf("Usage: step input-file {NS | TAMA]\n");
 	}
 
 	// 入力ファイル読み込み
@@ -170,28 +169,43 @@ int main(int argc, char **argv)
 	sprintf(buff, "%s\\S-%s", argv[2], argv[1]);
 	write_csv(buff, g);
 
+	// Lowpass
+	vector<_pair> go;
+	float fc = 1 / (g[1].t-g[0].t);  // 1e-8
+	lowpass(g, go, fc);
+	sprintf(buff, "%s\\L-%s", argv[2], argv[1]);
+	write_csv(buff, go);
+
 	// TN実験応答時間 T(2*tmax)
 	float tmin = 0.42e-6*2;
 	float tmax = 3.12e-6/2;
 	float TN = 0;   // 実験応答時間
 	float Ta = 0;   // 部分応答時間
 	float ts = 0;   // 整定時間
-	float beta = 0; // オーバーシュート
-	float O1 = detOrg(g);
-	TN = integralT(O1, 2*tmax, g);
+
+	// 原点O1
+	float O1 = detOrg(go);
+	// O1 = -2e-8; //!ST
+
+	// T(t)の計算
+	vector<_pair> T;
+	integralT(O1, g, T);
+	sprintf(buff, "%s\\S-T(t).txt", argv[2]);
+	write_csv(buff, T);
+
+	// TNの計算
+	int i;
+	for (i = 0; T[i].t < O1; i++);
+	for (i++; T[i].t < 2 * tmax; i++);
+	TN = T[i].v;
 	printf("TN=%10.3e\n", TN);
 
-	// Ta 部分応答時間 max(T(t)) t<2*tmax, 通常Ta=T(t1)ここでt1はg(t)=1となる最小のt
-	Ta = calc_Ta(g);
+	// Ta 部分応答時間 max(T(t)) t<2*tmax, （通常Ta=T(t1)ここでt1はg(t)=1となる最小のt？）
+	Ta = calc_Ta(T);
 	printf("Ta=%10.3e\n", Ta);
 
 	// ts 整定時間
-	vector<_pair> G;
-	integralT(O1, g, G);
-	sprintf(buff, "%s\\S-T(t).txt", argv[2]);
-	write_csv(buff, G);
-
-	ts = search_ts(G, TN);
+	ts = search_ts(T, TN);
 	printf("ts=%10.3e\n", ts);
 
 	return 0;
