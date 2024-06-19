@@ -93,18 +93,30 @@ bool write_csv(char* fname, vector<_pair>& g)
 //
 float detOrg(vector<_pair>& g)
 {
-	// データ開始後5000サンプルの振幅
+	int i = 0;
+#define CASE 3
+#if CASE==1
+	// eps=0.01を超えた点をO1
+	while (g[i].v <= 0.01) {
+		i++;
+	}
+#elif CASE==2
+	// データ開始後50000サンプルの振幅
 	float s = 0;
-	int i, n = 50000;
+	int n = 50000;
 	for (i = 0; i < n; i++)
 		s += fabs(g[i].v);
 	s /= n;
-
 	i = 0;
-	while (g[i].v <= s*100) {
+	while (g[i].v <= s * 100) {
 		i++;
 	}
-	printf("O1=%d, %10.7e, %10.7e\n", i, g[i].t, s);
+#else	// 電中研が設定したt<0を利用
+	while (g[i].t <= 0) {
+		i++;
+	}
+#endif
+	printf("O1=%d, %10.7e\n", i, g[i].t);
 	return g[i].t;	
 }
 
@@ -127,14 +139,17 @@ void integralT(float O1, vector<_pair>& g, vector<_pair>& T)
 
 // T (t)の最大値
 
-float calc_Ta(vector<_pair>&T)
+int calc_Ta(vector<_pair>&T, _pair& Ta)
 {
 	int i;
 	float mv = FLT_MIN;
 	for (i = 0; i < T.size(); i++) {
-		if (mv < T[i].v) mv = T[i].v;
+		if (mv < T[i].v) {
+			mv = T[i].v;
+			Ta = T[i];
+		}
 	}
-	return mv;
+	return i;
 }
 
 // fabs(TN-G(t))<0.02tが成り立つ最小のt
@@ -173,14 +188,14 @@ int main(int argc, char **argv)
 	vector<_pair> go;
 	float fc = 1 / (g[1].t-g[0].t);  // 1e-8
 	lowpass(g, go, fc);
-	sprintf(buff, "%s\\L-%s", argv[2], argv[1]);
+	sprintf(buff, "%s\\Lowpass.txt", argv[2]);
 	write_csv(buff, go);
 
 	// TN実験応答時間 T(2*tmax)
 	float tmin = 0.42e-6*2;
 	float tmax = 3.12e-6/2;
 	float TN = 0;   // 実験応答時間
-	float Ta = 0;   // 部分応答時間
+	_pair Ta;       // 部分応答時間
 	float ts = 0;   // 整定時間
 
 	// 原点O1
@@ -190,7 +205,7 @@ int main(int argc, char **argv)
 	// T(t)の計算
 	vector<_pair> T;
 	integralT(O1, g, T);
-	sprintf(buff, "%s\\S-T(t).txt", argv[2]);
+	sprintf(buff, "%s\\T(t).txt", argv[2]);
 	write_csv(buff, T);
 
 	// TNの計算
@@ -201,8 +216,8 @@ int main(int argc, char **argv)
 	printf("TN=%10.3e\n", TN);
 
 	// Ta 部分応答時間 max(T(t)) t<2*tmax, （通常Ta=T(t1)ここでt1はg(t)=1となる最小のt？）
-	Ta = calc_Ta(T);
-	printf("Ta=%10.3e\n", Ta);
+	calc_Ta(T, Ta);
+	printf("Ta=%10.3e\n", Ta.v);
 
 	// ts 整定時間
 	ts = search_ts(T, TN);

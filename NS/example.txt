@@ -1,0 +1,7 @@
+%text
+plot 'L-2010.txt' skip 3 every 100 with lines
+plot [-1e-7:1e-8] [-0.1:0.6] 'L-2010.txt' skip 3 every 10 with lines, "< echo 1.1e-9 10" with impulse
+
+%binary
+plot 'data.bin' binary format="%double" using 0:1 every 10000 with lines
+

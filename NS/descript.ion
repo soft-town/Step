@@ -1,0 +1,1 @@
+msrdc_zg4GNYU9hT.png T(t) plot  [0:3e-6][-5e-8:1e-8] '../../Step/NS/T(t).txt' skip 1 every 100 with lines
